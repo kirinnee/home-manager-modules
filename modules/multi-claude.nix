@@ -78,7 +78,7 @@ let
     pkgs.writeShellScriptBin "claude-${name}" ''
       export CLAUDE_CONFIG_DIR="$HOME/${configDir}"
       ${envExports}
-      exec ${claudeBinary} ${mcpFlags} "$@"
+      exec ${claudeBinary} "$@" ${mcpFlags}
     '';
 
   # Generate the directory matching shell function (single source of truth)
