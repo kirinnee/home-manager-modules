@@ -91,7 +91,7 @@ in
     aliases = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = { };
-      description = "Alias definitions. Each alias creates a short command that appends flags to gh. For example, `ghi = "--repo $(git remote get-url origin)"` creates `ghi`, `ghi-personal`, `ghi-work`, etc.";
+      description = "Alias definitions. Each alias creates a short command that appends flags to gh. For example, `ghi = \"--repo \$(git remote get-url origin)\"` creates `ghi`, `ghi-personal`, `ghi-work`, etc.";
     };
 
     accounts = lib.mkOption {
