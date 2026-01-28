@@ -88,6 +88,12 @@ in
       };
     };
 
+    aliases = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+      description = "Alias definitions. Each alias creates a short command that appends flags to gh. For example, `ghi = "--repo $(git remote get-url origin)"` creates `ghi`, `ghi-personal`, `ghi-work`, etc.";
+    };
+
     accounts = lib.mkOption {
       type = lib.types.attrsOf (lib.types.submodule ({ name, config, ... }: {
         options = {
@@ -154,6 +160,30 @@ in
         exec ${lib.getExe cfg.defaultPackage} "$@"
       '';
 
+      # Create alias packages for each alias
+      # Each alias generates: {alias} (smart) and {alias}-{account} (direct)
+      aliasPackages = lib.mapAttrsToList (aliasName: aliasFlags:
+        let
+          # Smart alias that uses directory matching
+          smartAlias = pkgs.writeShellScriptBin aliasName ''
+            ${generateMatchFunction}
+
+            username=$(_gh_match_account)
+            ${lib.getExe cfg.defaultPackage} auth switch -u "$username" >/dev/null 2>&1
+            exec ${lib.getExe cfg.defaultPackage} "$@" ${aliasFlags}
+          '';
+
+          # Per-account aliases (direct)
+          perAccountAliases = lib.mapAttrsToList (accountName: accountCfg:
+            pkgs.writeShellScriptBin "${aliasName}-${accountName}" ''
+              ${lib.getExe cfg.defaultPackage} auth switch -u "${accountCfg.username}" >/dev/null 2>&1
+              exec ${lib.getExe cfg.defaultPackage} "$@" ${aliasFlags}
+            ''
+          ) enabledAccounts;
+        in
+        [ smartAlias ] ++ perAccountAliases
+      ) cfg.aliases;
+
     in
     {
       # Assertions
@@ -198,10 +228,11 @@ in
         lib.mkAfter (functionDefs + activeFunction)
       );
 
-      # Add smart wrapper and wrapped packages
+      # Add smart wrapper, wrapped packages, and aliases
       home.packages =
         (lib.optionals cfg.smartWrapper.enable [ smartWrapperScript ]) ++
-        (lib.attrValues wrappedPackages);
+        (lib.attrValues wrappedPackages) ++
+        (lib.flatten aliasPackages);
     }
   );
 }

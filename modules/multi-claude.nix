@@ -141,6 +141,12 @@ in
       };
     };
 
+    aliases = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+      description = "Alias definitions. Each alias creates a short command that appends flags to claude. For example, `cc = "--dangerously-skip-permissions"` creates `cc`, `cc-personal`, `cc-work`, etc.";
+    };
+
     accounts = lib.mkOption {
       type = lib.types.attrsOf (lib.types.submodule ({ name, config, ... }: {
         options = {
@@ -308,6 +314,38 @@ in
         esac
       '';
 
+      # Create alias packages for each alias
+      # Each alias generates: {alias} (smart) and {alias}-{account} (direct)
+      aliasPackages = lib.mapAttrsToList (aliasName: aliasFlags:
+        let
+          # Smart alias that uses directory matching
+          smartAlias = pkgs.writeShellScriptBin aliasName ''
+            ${generateMatchFunction}
+
+            account=$(_claude_match_account)
+
+            case "$account" in
+              ${lib.concatMapStringsSep "\n" ({ name, value }: ''
+              "${name}")
+                exec ${lib.getExe wrappedPackages.${name}} "$@" ${aliasFlags}
+                ;;''
+              ) sortedAccounts}
+              *)
+                exec ${lib.getExe wrappedPackages.${cfg.defaultAccount}} "$@" ${aliasFlags}
+                ;;
+            esac
+          '';
+
+          # Per-account aliases (direct)
+          perAccountAliases = lib.mapAttrsToList (accountName: accountCfg:
+            pkgs.writeShellScriptBin "${aliasName}-${accountName}" ''
+              exec ${lib.getExe wrappedPackages.${accountName}} "$@" ${aliasFlags}
+            ''
+          ) enabledAccounts;
+        in
+        [ smartAlias ] ++ perAccountAliases
+      ) cfg.aliases;
+
     in
     {
       # Assertions
@@ -439,10 +477,11 @@ in
         lib.mkAfter (functionDefs + activeFunction)
       );
 
-      # Add smart wrapper and wrapped packages
+      # Add smart wrapper, wrapped packages, and aliases
       home.packages =
         (lib.optionals cfg.smartWrapper.enable [ smartWrapperScript ]) ++
-        (lib.attrValues wrappedPackages);
+        (lib.attrValues wrappedPackages) ++
+        (lib.flatten aliasPackages);
     }
   );
 }

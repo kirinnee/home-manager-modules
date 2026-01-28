@@ -14,6 +14,7 @@ Manage multiple Claude Code accounts with isolated configurations, MCP servers, 
 - MCP server support per account
 - Shell integration with optional prompt helper
 - Smart `claude` wrapper that routes to correct account
+- **Custom aliases** for common flag combinations
 
 ### Multi-GH (`multi-gh`)
 
@@ -100,6 +101,41 @@ Manage multiple GitHub CLI accounts with automatic directory-based account switc
 | `smartWrapper.enable` | boolean | `true` | Create smart `claude` wrapper |
 | `shellIntegration.functions` | boolean | `false` | Create `<name>-claude` shell functions |
 | `shellIntegration.showActive` | boolean | `true` | Add `_claude_active_account()` for prompts |
+| `aliases` | attrs of string | `{ }` | Custom aliases (see below) |
+
+### Aliases
+
+Create short commands that automatically append flags:
+
+```nix
+programs.multi-claude = {
+  enable = true;
+  defaultAccount = "personal";
+
+  aliases = {
+    # Short alias for skipping permission prompts
+    cc = "--dangerously-skip-permissions";
+
+    # Alias for verbose output
+    cv = "--verbose";
+
+    # Alias for both flags combined
+    ccv = "--dangerously-skip-permissions --verbose";
+  };
+
+  accounts = {
+    personal = { directoryRules = [ "~/" ]; };
+    work = { directoryRules = [ "~/Workspace/work" ]; };
+  };
+};
+```
+
+This generates the following commands:
+
+- `cc` → `claude --dangerously-skip-permissions` (uses directory matching)
+- `cc-personal` → `claude-personal --dangerously-skip-permissions` (direct to personal account)
+- `cc-work` → `claude-work --dangerously-skip-permissions` (direct to work account)
+- `cv`, `cv-personal`, `cv-work` → with `--verbose` flag
 
 ## Multi-GH Usage
 
@@ -137,6 +173,42 @@ Manage multiple GitHub CLI accounts with automatic directory-based account switc
 | `smartWrapper.enable` | boolean | `true` | Create smart `gh` wrapper |
 | `shellIntegration.functions` | boolean | `false` | Create `gh-<name>` shell functions |
 | `shellIntegration.showActive` | boolean | `true` | Add `_gh_active_account()` for prompts |
+| `aliases` | attrs of string | `{ }` | Custom aliases (see below) |
+
+### Aliases
+
+Create short commands for common `gh` invocations:
+
+```nix
+programs.multi-gh = {
+  enable = true;
+  defaultAccount = "personal";
+
+  aliases = {
+    # Short alias for issue operations
+    ghi = "issue";
+
+    # Alias for PR operations with JSON output
+    ghpr = "pr --json title,state,url";
+  };
+
+  accounts = {
+    personal = {
+      username = "yourgithubusername";
+      directoryRules = [ "~/" ];
+    };
+    work = {
+      username = "workgithubusername";
+      directoryRules = [ "~/src/work" ];
+    };
+  };
+};
+```
+
+This generates:
+- `ghi` → `gh issue` (uses directory matching for account)
+- `ghi-personal` → `gh-personal issue` (direct to personal account)
+- `ghi-work` → `gh-work issue` (direct to work account)
 
 ### Per-Account Options (multi-gh)
 
