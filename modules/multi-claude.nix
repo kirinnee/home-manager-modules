@@ -144,7 +144,7 @@ in
     aliases = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = { };
-      description = "Alias definitions. Each alias creates a short command that appends flags to claude. For example, `cc = "--dangerously-skip-permissions"` creates `cc`, `cc-personal`, `cc-work`, etc.";
+      description = ''Alias definitions. Each alias creates a short command that appends flags to claude. For example, `cc = "--dangerously-skip-permissions"` creates `cc`, `cc-personal`, `cc-work`, etc.'';
     };
 
     accounts = lib.mkOption {
