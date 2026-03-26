@@ -1,4 +1,4 @@
-# Home Manager Modules - Multi-Claude and Multi-GH
+# Home Manager Modules - Multi-Account CLI Tools
 
 A collection of Home Manager modules for managing multiple accounts for CLI tools with automatic directory-based switching.
 
@@ -27,6 +27,18 @@ Manage multiple GitHub CLI accounts with automatic directory-based account switc
 - Shell integration with optional prompt helper
 - Priority-based directory matching
 
+### Multi-GWS (`multi-gws`)
+
+Manage multiple Google Workspace CLI (gws) accounts with automatic directory-based account switching via `GOOGLE_WORKSPACE_CLI_CONFIG_DIR`.
+
+**Features:**
+- Directory-based account switching
+- Per-account binaries (`gws-liftoff`, `gws-personal`, etc.)
+- Smart `gws` wrapper that auto-switches accounts
+- Shell integration with optional prompt helper
+- Priority-based directory matching
+- Per-account environment variables
+
 ## Quick Start
 
 ### Add as a Flake Input
@@ -48,6 +60,7 @@ Manage multiple GitHub CLI accounts with automatic directory-based account switc
       modules = [
         home-manager-modules.homeManagerModules.multi-claude
         home-manager-modules.homeManagerModules.multi-gh
+        home-manager-modules.homeManagerModules.multi-gws
         ./home.nix
       ];
     };
@@ -220,9 +233,84 @@ This generates:
 | `directoryRules` | list of string | `[ ]` | Paths that trigger this account (supports `~`) |
 | `package` | package or null | `null` | Override package for this account |
 
+## Multi-GWS Usage
+
+### Basic Configuration
+
+```nix
+{ config, pkgs, ... }: {
+  programs.multi-gws = {
+    enable = true;
+    defaultAccount = "personal";
+
+    accounts = {
+      liftoff = {
+        priority = 50;
+        directoryRules = [ "~/Workspace/liftoff" ];
+      };
+
+      personal = {
+        directoryRules = [ "~/" ];
+      };
+    };
+  };
+}
+```
+
+### Key Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enable` | boolean | `false` | Enable the module |
+| `defaultPackage` | package | `gws` (from flake input) | Default gws package |
+| `defaultAccount` | string | *(required)* | Fallback account name |
+| `smartWrapper.enable` | boolean | `true` | Create smart `gws` wrapper |
+| `shellIntegration.functions` | boolean | `false` | Create `gws-<name>` shell functions |
+| `shellIntegration.showActive` | boolean | `true` | Add `_gws_active_account()` for prompts |
+| `aliases` | attrs of string | `{ }` | Custom aliases (see below) |
+
+### Aliases
+
+Create short commands for common `gws` invocations:
+
+```nix
+programs.multi-gws = {
+  enable = true;
+  defaultAccount = "personal";
+
+  aliases = {
+    # Short alias for Drive operations
+    gd = "drive";
+
+    # Alias for Gmail
+    gm = "gmail";
+  };
+
+  accounts = {
+    liftoff = { directoryRules = [ "~/Workspace/liftoff" ]; };
+    personal = { directoryRules = [ "~/" ]; };
+  };
+};
+```
+
+This generates:
+- `gd` → `gws drive` (uses directory matching for account)
+- `gd-liftoff` → `gws-liftoff drive` (direct to liftoff account)
+- `gd-personal` → `gws-personal drive` (direct to personal account)
+
+### Per-Account Options (multi-gws)
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enable` | boolean | `true` | Enable this account |
+| `priority` | int | `100` | Match priority (lower = first) |
+| `directoryRules` | list of string | `[ ]` | Paths that trigger this account (supports `~`) |
+| `package` | package or null | `null` | Override package for this account |
+| `env` | attrs of string | `{ }` | Environment variables to export (supports shell expansion) |
+
 ## How It Works
 
-When you run the wrapped command (`claude` or `gh`) in a directory:
+When you run the wrapped command (`claude`, `gh`, or `gws`) in a directory:
 
 1. The wrapper checks your current working directory against `directoryRules`
 2. Rules are checked by **priority** (lower number = checked first)
@@ -235,7 +323,7 @@ Add to your zsh prompt to show the active account:
 
 ```nix
 programs.zsh.promptInit = ''
-  RPROMPT='$(_claude_active_account)$(_gh_active_account)'"$RPROMPT"
+  RPROMPT='$(_claude_active_account)$(_gh_active_account)$(_gws_active_account)'"$RPROMPT"
 '';
 ```
 
@@ -273,10 +361,17 @@ For each account, a `gh-<name>` binary is created that:
 - Runs `gh auth switch -u <username>` before executing
 - Executes the underlying `gh` binary with all arguments
 
+### Multi-GWS
+For each account, a `gws-<name>` binary is created that:
+- Sets `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` to `~/.config/gws-<name>`
+- Exports the account's `env` variables
+- Executes the underlying `gws` binary with all arguments
+
 ## Requirements
 
 - GitHub CLI users must run `gh auth login` for each account before using the module
-- The module only handles account switching, not initial authentication
+- GWS users must run `GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws-<name> gws auth login` for each account before using the module
+- The modules only handle account switching, not initial authentication
 
 ## File Structure (multi-claude)
 
