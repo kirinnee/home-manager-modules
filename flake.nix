@@ -19,6 +19,9 @@
       import ./modules/multi-gws.nix (args // {
         gwsPackage = gws.packages.${pkgs.stdenv.hostPlatform.system}.default;
       });
+    homeManagerModules.multi-codex = import ./modules/multi-codex.nix;
+    homeManagerModules.multi-gemini = import ./modules/multi-gemini.nix;
+    homeManagerModules.multi-opencode = import ./modules/multi-opencode.nix;
 
     # Development shell for nix tooling
     devShells = builtins.mapAttrs
