@@ -316,6 +316,7 @@ in
           # Symlink directories
           // lib.optionalAttrs (accountCfg.skillsDir != null) {
             "${configDir}/.agents/skills".source = accountCfg.skillsDir;
+            "${configDir}/skills".source = accountCfg.skillsDir;
           }
           // lib.optionalAttrs (accountCfg.hooksDir != null) {
             "${configDir}/hooks".source = accountCfg.hooksDir;
@@ -332,15 +333,18 @@ in
             })
             accountCfg.hooks
 
-          # Inline skills (can be files or directories)
-          // lib.mapAttrs'
+          # Inline skills (can be files or directories) — deploy to both paths
+          # for codex <0.118.0 (.agents/skills/) and >=0.118.0 (skills/)
+          // builtins.listToAttrs (lib.concatLists (lib.mapAttrsToList
             (skillName: skillContent:
-              if lib.isPath skillContent then
-                { name = "${configDir}/.agents/skills/${skillName}"; value.source = skillContent; }
-              else
-                { name = "${configDir}/.agents/skills/${skillName}"; value.text = skillContent; }
-            )
-            accountCfg.skills
+              let
+                value = if lib.isPath skillContent then { source = skillContent; } else { text = skillContent; };
+              in
+              [
+                { name = "${configDir}/.agents/skills/${skillName}"; inherit value; }
+                { name = "${configDir}/skills/${skillName}"; inherit value; }
+              ])
+            accountCfg.skills))
         )
         { }
         enabledAccounts;
