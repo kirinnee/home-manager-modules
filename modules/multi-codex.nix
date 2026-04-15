@@ -317,16 +317,14 @@ in
           # Skills are symlinked per-subdir (not as a whole dir) so that codex
           # can still write its bundled $CODEX_HOME/skills/.system/ at runtime.
           // (if accountCfg.skillsDir != null then
-            lib.foldlAttrs
-              (acc2: skillName: _:
-                acc2 // {
-                  "${configDir}/.agents/skills/${skillName}".source =
-                    "${accountCfg.skillsDir}/${skillName}";
-                  "${configDir}/skills/${skillName}".source =
-                    "${accountCfg.skillsDir}/${skillName}";
-                })
-              { }
-              (builtins.readDir accountCfg.skillsDir)
+            builtins.listToAttrs (lib.concatLists (lib.mapAttrsToList
+              (skillName: _:
+                let value = { source = "${accountCfg.skillsDir}/${skillName}"; }; in
+                [
+                  { name = "${configDir}/.agents/skills/${skillName}"; inherit value; }
+                  { name = "${configDir}/skills/${skillName}"; inherit value; }
+                ])
+              (builtins.readDir accountCfg.skillsDir)))
           else { })
           // lib.optionalAttrs (accountCfg.hooksDir != null) {
             "${configDir}/hooks".source = accountCfg.hooksDir;
