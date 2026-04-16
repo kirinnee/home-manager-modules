@@ -314,7 +314,7 @@ in
           }
 
           # Symlink hooks directory (skills are handled via home.activation below
-          # so that codex can still write its bundled skills/.system/ at runtime)
+          # so codex can still write bundled skill data at runtime)
           // lib.optionalAttrs (accountCfg.hooksDir != null) {
             "${configDir}/hooks".source = accountCfg.hooksDir;
           }
@@ -330,8 +330,7 @@ in
             })
             accountCfg.hooks
 
-          # Inline skills (can be files or directories) — deploy to both paths
-          # for codex <0.118.0 (.agents/skills/) and >=0.118.0 (skills/)
+          # Inline skills (can be files or directories)
           // builtins.listToAttrs (lib.concatLists (lib.mapAttrsToList
             (skillName: skillContent:
               let
@@ -339,7 +338,6 @@ in
               in
               [
                 { name = "${configDir}/.agents/skills/${skillName}"; inherit value; }
-                { name = "${configDir}/skills/${skillName}"; inherit value; }
               ])
             accountCfg.skills))
         )
@@ -347,7 +345,7 @@ in
         enabledAccounts;
 
       # Symlink skillsDir subdirectories via activation scripts (not home.file)
-      # so that codex can still write its bundled skills/.system/ at runtime.
+      # so codex can still write bundled skill data at runtime.
       # Using home.file for per-subdir entries would overflow the module system
       # stack when home.file already has many entries.
       home.activation = lib.foldlAttrs
@@ -358,19 +356,28 @@ in
           acc // lib.optionalAttrs (accountCfg.skillsDir != null) {
             "codexSkills-${name}" = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
               skillsSrc="${accountCfg.skillsDir}"
-              for destBase in "$HOME/${configDir}/.agents/skills" "$HOME/${configDir}/skills"; do
-                $DRY_RUN_CMD mkdir -p "$destBase"
-                # Remove stale symlinks pointing into the nix store
-                for link in "$destBase"/*; do
+              legacyDestBase="$HOME/${configDir}/skills"
+              if [ -d "$legacyDestBase" ]; then
+                for link in "$legacyDestBase"/*; do
                   [ -L "$link" ] || continue
                   target=$(readlink "$link")
                   case "$target" in /nix/store/*) $DRY_RUN_CMD rm "$link" ;; esac
                 done
-                # Create fresh symlinks for each skill subdir
-                for skill in "$skillsSrc"/*/; do
-                  [ -d "$skill" ] || continue
-                  $DRY_RUN_CMD ln -sfn "$skill" "$destBase/$(basename "$skill")"
-                done
+                $DRY_RUN_CMD rmdir "$legacyDestBase" 2>/dev/null || true
+              fi
+
+              destBase="$HOME/${configDir}/.agents/skills"
+              $DRY_RUN_CMD mkdir -p "$destBase"
+              # Remove stale symlinks pointing into the nix store
+              for link in "$destBase"/*; do
+                [ -L "$link" ] || continue
+                target=$(readlink "$link")
+                case "$target" in /nix/store/*) $DRY_RUN_CMD rm "$link" ;; esac
+              done
+              # Create fresh symlinks for each skill subdir
+              for skill in "$skillsSrc"/*/; do
+                [ -d "$skill" ] || continue
+                $DRY_RUN_CMD ln -sfn "$skill" "$destBase/$(basename "$skill")"
               done
             '';
           }
