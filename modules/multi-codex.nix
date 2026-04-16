@@ -313,19 +313,8 @@ in
             "${configDir}/hooks.json".text = builtins.toJSON accountCfg.hooksConfig;
           }
 
-          # Symlink directories
-          # Skills are symlinked per-subdir (not as a whole dir) so that codex
-          # can still write its bundled $CODEX_HOME/skills/.system/ at runtime.
-          // (if accountCfg.skillsDir != null then
-            builtins.listToAttrs (lib.concatLists (lib.mapAttrsToList
-              (skillName: _:
-                let value = { source = "${accountCfg.skillsDir}/${skillName}"; }; in
-                [
-                  { name = "${configDir}/.agents/skills/${skillName}"; inherit value; }
-                  { name = "${configDir}/skills/${skillName}"; inherit value; }
-                ])
-              (builtins.readDir accountCfg.skillsDir)))
-          else { })
+          # Symlink hooks directory (skills are handled via home.activation below
+          # so that codex can still write its bundled skills/.system/ at runtime)
           // lib.optionalAttrs (accountCfg.hooksDir != null) {
             "${configDir}/hooks".source = accountCfg.hooksDir;
           }
@@ -353,6 +342,38 @@ in
                 { name = "${configDir}/skills/${skillName}"; inherit value; }
               ])
             accountCfg.skills))
+        )
+        { }
+        enabledAccounts;
+
+      # Symlink skillsDir subdirectories via activation scripts (not home.file)
+      # so that codex can still write its bundled skills/.system/ at runtime.
+      # Using home.file for per-subdir entries would overflow the module system
+      # stack when home.file already has many entries.
+      home.activation = lib.foldlAttrs
+        (acc: name: accountCfg:
+          let
+            configDir = getConfigDir name accountCfg;
+          in
+          acc // lib.optionalAttrs (accountCfg.skillsDir != null) {
+            "codexSkills-${name}" = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+              skillsSrc="${accountCfg.skillsDir}"
+              for destBase in "$HOME/${configDir}/.agents/skills" "$HOME/${configDir}/skills"; do
+                $DRY_RUN_CMD mkdir -p "$destBase"
+                # Remove stale symlinks pointing into the nix store
+                for link in "$destBase"/*; do
+                  [ -L "$link" ] || continue
+                  target=$(readlink "$link")
+                  case "$target" in /nix/store/*) $DRY_RUN_CMD rm "$link" ;; esac
+                done
+                # Create fresh symlinks for each skill subdir
+                for skill in "$skillsSrc"/*/; do
+                  [ -d "$skill" ] || continue
+                  $DRY_RUN_CMD ln -sfn "$skill" "$destBase/$(basename "$skill")"
+                done
+              done
+            '';
+          }
         )
         { }
         enabledAccounts;
