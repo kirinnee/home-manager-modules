@@ -290,16 +290,13 @@ in
         (acc: name: accountCfg:
           let
             configDir = getConfigDir name accountCfg;
-            # Build config.toml: merge user settings with MCP servers
-            configToml = accountCfg.settings // (
-              lib.optionalAttrs (accountCfg.mcpServers != { }) {
-                mcp_servers = accountCfg.mcpServers;
-              }
-            );
           in
           acc // {
-            # config.toml
-            "${configDir}/config.toml".source = tomlFormat.generate "codex-${name}-config.toml" configToml;
+            # config.toml is intentionally NOT a home.file symlink. codex writes
+            # its directory-trust ([projects]) into config.toml at runtime, which a
+            # read-only /nix/store symlink makes impossible. It is instead written
+            # as a writable file by the codexConfig-<name> activation below, which
+            # re-asserts the Nix-owned keys while preserving the live [projects].
 
             # AGENTS.md
           } // lib.optionalAttrs (accountCfg.memory.text != null || accountCfg.memory.source != null) {
@@ -352,8 +349,53 @@ in
         (acc: name: accountCfg:
           let
             configDir = getConfigDir name accountCfg;
+            # Same content the read-only symlink used to carry.
+            configToml = accountCfg.settings // (
+              lib.optionalAttrs (accountCfg.mcpServers != { }) {
+                mcp_servers = accountCfg.mcpServers;
+              }
+            );
+            baseConfig = tomlFormat.generate "codex-${name}-config.toml" configToml;
           in
-          acc // lib.optionalAttrs (accountCfg.skillsDir != null) {
+          acc // {
+            # Write config.toml as a WRITABLE file (not a /nix/store symlink) so
+            # codex can persist its runtime [projects] trust table. Each activation
+            # re-asserts the Nix-owned keys and preserves the live [projects].
+            "codexConfig-${name}" = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+              base="${baseConfig}"
+              target="$HOME/${configDir}/config.toml"
+              $DRY_RUN_CMD mkdir -p "$HOME/${configDir}"
+              liveJson=""
+              if [ -e "$target" ] && [ ! -L "$target" ]; then
+                liveJson=$(${pkgs.remarshal}/bin/remarshal -if toml -of json < "$target" 2>/dev/null || true)
+              fi
+              if [ -z "$liveJson" ]; then
+                # Fresh, missing, corrupt, or an old read-only symlink: seed a copy.
+                $DRY_RUN_CMD rm -f "$target"
+                $DRY_RUN_CMD cp "$base" "$target"
+                $DRY_RUN_CMD chmod 600 "$target"
+              else
+                # Deep-merge: keep everything codex wrote at runtime (directory
+                # trust under [projects], MCP servers added via `codex mcp add`,
+                # plugin/config-edit state, …) and re-assert the Nix-owned keys on
+                # top ($b wins on conflicts). `$l * $b` recursively merges objects,
+                # so a runtime-added server survives while Nix's declared keys win.
+                # Caveat: this is stateless, so REMOVING a key from Nix settings
+                # won't delete it from an existing config.toml (live keeps it) —
+                # change the value instead of deleting it.
+                merged=$(${pkgs.jq}/bin/jq -n \
+                  --argjson b "$(${pkgs.remarshal}/bin/remarshal -if toml -of json < "$base")" \
+                  --argjson l "$liveJson" \
+                  '$l * $b')
+                tmp=$(mktemp "$HOME/${configDir}/.config.toml.XXXXXX")
+                printf '%s' "$merged" | ${pkgs.remarshal}/bin/remarshal -if json -of toml > "$tmp"
+                $DRY_RUN_CMD mv "$tmp" "$target"
+                $DRY_RUN_CMD chmod 600 "$target"
+                # In dry-run, $DRY_RUN_CMD only echoes mv, so clean the temp file.
+                rm -f "$tmp"
+              fi
+            '';
+          } // lib.optionalAttrs (accountCfg.skillsDir != null) {
             "codexSkills-${name}" = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
               skillsSrc="${accountCfg.skillsDir}"
               legacyDestBase="$HOME/${configDir}/skills"
