@@ -57,6 +57,36 @@ let
     lib.filterAttrs (n: v: v != null)
       (lib.mapAttrs (name: transformMcpServer) servers);
 
+  # Shell snippet (account-independent) that pre-marks the current directory as
+  # trusted in the active account's `.claude.json`, so the "Do you trust the
+  # files in this folder?" dialog never appears. Relies on $CLAUDE_CONFIG_DIR
+  # being exported by the wrapper before this runs. Idempotent: it only writes
+  # when the directory isn't already trusted, and never clobbers a corrupt or
+  # concurrently-held config (jq failure -> skip). Set CLAUDE_AUTOTRUST=0 at
+  # runtime to bypass for a single launch.
+  trustSnippet = lib.optionalString cfg.autoTrust ''
+    if [ "''${CLAUDE_AUTOTRUST:-1}" = "1" ]; then
+      _ct_cfg="$CLAUDE_CONFIG_DIR/.claude.json"
+      if ! ${pkgs.jq}/bin/jq -e --arg d "$PWD" \
+        '(.projects[$d].hasTrustDialogAccepted) == true' "$_ct_cfg" >/dev/null 2>&1; then
+        ${pkgs.coreutils}/bin/mkdir -p "$CLAUDE_CONFIG_DIR"
+        _ct_tmp="$(${pkgs.coreutils}/bin/mktemp)"
+        if [ -f "$_ct_cfg" ]; then
+          _ct_ok=$(${pkgs.jq}/bin/jq --arg d "$PWD" \
+            '.projects[$d].hasTrustDialogAccepted = true' "$_ct_cfg" > "$_ct_tmp" 2>/dev/null && echo y)
+        else
+          _ct_ok=$(${pkgs.jq}/bin/jq -n --arg d "$PWD" \
+            '{projects: {($d): {hasTrustDialogAccepted: true}}}' > "$_ct_tmp" 2>/dev/null && echo y)
+        fi
+        if [ "$_ct_ok" = y ]; then
+          ${pkgs.coreutils}/bin/mv "$_ct_tmp" "$_ct_cfg"
+        else
+          ${pkgs.coreutils}/bin/rm -f "$_ct_tmp"
+        fi
+      fi
+    fi
+  '';
+
   # Create a wrapped claude binary for an account with MCP config
   createWrappedClaude = name: accountCfg:
     let
@@ -78,6 +108,7 @@ let
     pkgs.writeShellScriptBin "claude-${name}" ''
       export CLAUDE_CONFIG_DIR="$HOME/${configDir}"
       ${envExports}
+      ${trustSnippet}
       exec ${claudeBinary} "$@" ${mcpFlags}
     '';
 
@@ -125,6 +156,19 @@ in
         default = true;
         description = "Create smart `claude` wrapper that auto-detects account";
       };
+    };
+
+    autoTrust = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Automatically mark the launch directory as trusted in the active
+        account's `.claude.json` before starting Claude, skipping the "Do you
+        trust the files in this folder?" dialog. Applies to every account
+        wrapper and every launch path (smart wrapper, aliases, per-account
+        binaries). Set the CLAUDE_AUTOTRUST=0 environment variable at runtime
+        to bypass for a single launch.
+      '';
     };
 
     shellIntegration = {
