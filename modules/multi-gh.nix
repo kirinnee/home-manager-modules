@@ -140,12 +140,47 @@ in
       # Create wrapped packages for each account
       wrappedPackages = lib.mapAttrs createWrappedGh enabledAccounts;
 
+      # Space-separated list of every configured account username, in priority
+      # order, used by the `gh login` login-all handler below.
+      loginUsernames = lib.concatMapStringsSep " " ({ value, ... }: value.username) sortedAccounts;
+
+      # `gh login` (our own subcommand, not `gh auth login`) checks every
+      # configured account and runs `gh auth login` for each one that isn't
+      # already authenticated, so a single command brings the whole fleet up.
+      loginAllSnippet = ''
+        if [ "$1" = "login" ]; then
+          shift
+          echo "🔐 Checking all configured GitHub accounts…" >&2
+          _gh_status="$(${lib.getExe cfg.defaultPackage} auth status 2>&1 || true)"
+          _gh_missing=0
+          for _gh_u in ${loginUsernames}; do
+            if printf '%s\n' "$_gh_status" | grep -q "account $_gh_u "; then
+              echo "  ✓ $_gh_u — already logged in" >&2
+            else
+              echo "" >&2
+              echo "  → $_gh_u — NOT logged in. Starting login; authenticate as $_gh_u." >&2
+              ${lib.getExe cfg.defaultPackage} auth login "$@"
+              _gh_missing=$((_gh_missing + 1))
+            fi
+          done
+          if [ "$_gh_missing" -eq 0 ]; then
+            echo "✅ All configured accounts are already logged in." >&2
+          else
+            echo "✅ Logged in $_gh_missing account(s)." >&2
+          fi
+          exit 0
+        fi
+      '';
+
       # Generate the smart wrapper script
       smartWrapperScript = pkgs.writeShellScriptBin "gh" ''
         # GitHub CLI Multi-Account Smart Wrapper
         # Automatically switches accounts based on current working directory
 
         ${generateMatchFunction}
+
+        # `gh login`: detect and log into every account that isn't authenticated.
+        ${loginAllSnippet}
 
         # Main execution
         username=$(_gh_match_account)
