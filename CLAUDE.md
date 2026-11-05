@@ -56,7 +56,7 @@ Each module in `modules/` follows the same pattern:
 ### Module-Specific Details
 
 - **multi-claude**: Most complex. Manages full Claude Code config tree (settings.json, CLAUDE.md, rules/, agents/, commands/, hooks/, skills/) and MCP server config via `--mcp-config`. Uses `pkgs.formats.json` for generating MCP config files.
-- **multi-gh**: Never runs `gh auth switch` (it rewrites `hosts.yml`, which concurrent callers corrupt). The shared `ghExecAs` helper reads `gh auth token -u <username>` and execs gh with `GH_TOKEN` for that process only. Match function returns username, not account name.
+- **multi-gh**: Does not run `gh auth switch` for normal calls (it rewrites `hosts.yml`, which concurrent callers corrupt). The shared `ghExecAs` helper reads `gh auth token -u <username>` and execs gh with `GH_TOKEN` for that process only (`GH_ENTERPRISE_TOKEN` + `--hostname` when `GH_HOST` is a non-github.com host). Exception: `gh auth refresh`/`logout` act on the stored active account, so they still run `auth switch` first. Match function returns username, not account name.
 - **multi-gws**: Sets `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` per account. Receives `gwsPackage` as a flake input argument (injected in `flake.nix`).
 - **multi-codex**: Generates `config.toml` (TOML format) per account. MCP servers go into `[mcp_servers]` section. Hooks use separate `hooks.json` file. Skills placed in `.agents/skills/`. Memory file is `AGENTS.md`.
 - **multi-gemini**: Generates `settings.json` per account. Hooks and MCP servers merge into settings.json. Skills in `skills/`, commands in `commands/` (TOML), policies in `policies/` (TOML). Memory via `memory.md`, context via `GEMINI.md`.

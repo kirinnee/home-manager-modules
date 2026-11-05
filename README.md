@@ -18,7 +18,7 @@ Manage multiple Claude Code accounts with isolated configurations, MCP servers, 
 
 ### Multi-GH (`multi-gh`)
 
-Manage multiple GitHub CLI accounts with automatic directory-based account switching by handing each gh process the right account's token (`GH_TOKEN`), never by switching the stored account.
+Manage multiple GitHub CLI accounts with automatic directory-based account switching by handing each gh process the right account's token (`GH_TOKEN`, or `GH_ENTERPRISE_TOKEN` for non-github.com hosts) instead of switching the stored account. The only exceptions are `gh auth refresh` and `gh auth logout`, which act on the stored active account and so still run `gh auth switch` first.
 
 **Features:**
 - Directory-based account switching
@@ -358,8 +358,9 @@ For each account, a `claude-<name>` binary is created that:
 
 ### Multi-GH
 For each account, a `gh-<name>` binary is created that:
-- Reads the account's token read-only (`gh auth token -u <username>`) and runs gh with it in `GH_TOKEN` for that one process; `hosts.yml` is never rewritten, so concurrent gh calls cannot corrupt it
-- Respects a `GH_TOKEN`/`GITHUB_TOKEN` already set by the caller, and passes `gh auth login/logout/switch/refresh/setup-git` straight through
+- Reads the account's token read-only (`gh auth token -u <username>`) and runs gh with it in `GH_TOKEN` for that one process; when `GH_HOST` is set to a non-github.com host it uses `--hostname "$GH_HOST"` and `GH_ENTERPRISE_TOKEN` instead (gh ignores `GH_TOKEN` there). Normal calls never rewrite `hosts.yml`, so concurrent gh calls cannot corrupt it
+- Respects a token already set by the caller (`GH_TOKEN`/`GITHUB_TOKEN`, or `GH_ENTERPRISE_TOKEN` for non-github.com hosts), and passes `gh auth login/switch/setup-git` straight through
+- `gh auth refresh` and `gh auth logout` still run `gh auth switch -u <username>` first (rewriting `hosts.yml`), because they must act on the stored account; these are rare, manual commands
 - If the token lookup fails, warns on stderr (account name only) and falls back to gh's active account
 - Executes the underlying `gh` binary with all arguments
 

@@ -38,25 +38,40 @@ let
     }
   '';
 
-  # Shared helper: run gh as a given account WITHOUT touching hosts.yml.
-  # `gh auth switch` rewrites ~/.config/gh/hosts.yml, and concurrent callers
-  # corrupt it. Instead we read the account's token (read-only) and hand it to
-  # this one process through GH_TOKEN. Never prints or logs the token.
+  # Shared helper: run gh as a given account, normally WITHOUT touching
+  # hosts.yml. `gh auth switch` rewrites ~/.config/gh/hosts.yml, and concurrent
+  # callers corrupt it. Instead we read the account's token (read-only) and hand
+  # it to this one process: GH_TOKEN for github.com, GH_ENTERPRISE_TOKEN when
+  # GH_HOST names another host (gh ignores GH_TOKEN there). Never prints or
+  # logs the token.
+  # Exception: `gh auth refresh` and `gh auth logout` act on the stored ACTIVE
+  # account, so for those two (rare, manual) we still run `gh auth switch`
+  # first. login/switch/setup-git are plain pass-through.
   # Usage: _gh_exec_as <gh-binary> <username> [gh args...]
   ghExecAs = ''
     _gh_exec_as() {
       local gh_bin="$1" gh_user="$2"
       shift 2
-      # Respect a token the caller already chose, and leave `gh auth
-      # login/logout/switch/refresh/setup-git` on the stored credentials.
       case "''${1:-}:''${2:-}" in
-        auth:login|auth:logout|auth:switch|auth:refresh|auth:setup-git) exec "$gh_bin" "$@" ;;
+        auth:refresh|auth:logout)
+          [[ -n "$gh_user" ]] && "$gh_bin" auth switch -u "$gh_user" >/dev/null 2>&1
+          exec "$gh_bin" "$@" ;;
+        auth:login|auth:switch|auth:setup-git) exec "$gh_bin" "$@" ;;
       esac
-      if [[ -z "''${GH_TOKEN:-}" && -z "''${GITHUB_TOKEN:-}" && -n "$gh_user" ]]; then
+      local gh_host="''${GH_HOST:-}" gh_token_var=GH_TOKEN gh_have_token=""
+      local -a gh_host_args=()
+      if [[ -n "$gh_host" && "$gh_host" != "github.com" ]]; then
+        gh_token_var=GH_ENTERPRISE_TOKEN
+        gh_host_args=(--hostname "$gh_host")
+        [[ -n "''${GH_ENTERPRISE_TOKEN:-}" ]] && gh_have_token=1
+      else
+        [[ -n "''${GH_TOKEN:-}" || -n "''${GITHUB_TOKEN:-}" ]] && gh_have_token=1
+      fi
+      if [[ -z "$gh_have_token" && -n "$gh_user" ]]; then
         local gh_token
-        gh_token="$("$gh_bin" auth token -u "$gh_user" 2>/dev/null)" || gh_token=""
+        gh_token="$("$gh_bin" auth token -u "$gh_user" "''${gh_host_args[@]}" 2>/dev/null)" || gh_token=""
         if [[ -n "$gh_token" ]]; then
-          export GH_TOKEN="$gh_token"
+          export "$gh_token_var=$gh_token"
         else
           echo "multi-gh: could not read a token for account '$gh_user'; using gh's active account" >&2
         fi
