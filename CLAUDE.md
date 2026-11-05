@@ -40,7 +40,7 @@ Each module in `modules/` follows the same pattern:
 | Module file | Option path | Config format | Isolation env var |
 |---|---|---|---|
 | `multi-claude.nix` | `programs.claude-multi` | JSON | `CLAUDE_CONFIG_DIR` |
-| `multi-gh.nix` | `programs.multi-gh` | — | `gh auth switch` |
+| `multi-gh.nix` | `programs.multi-gh` | — | `GH_TOKEN` (per process) |
 | `multi-gws.nix` | `programs.multi-gws` | — | `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` |
 | `multi-codex.nix` | `programs.multi-codex` | TOML | `CODEX_HOME` |
 | `multi-gemini.nix` | `programs.multi-gemini` | JSON | `GEMINI_CLI_HOME` |
@@ -56,7 +56,7 @@ Each module in `modules/` follows the same pattern:
 ### Module-Specific Details
 
 - **multi-claude**: Most complex. Manages full Claude Code config tree (settings.json, CLAUDE.md, rules/, agents/, commands/, hooks/, skills/) and MCP server config via `--mcp-config`. Uses `pkgs.formats.json` for generating MCP config files.
-- **multi-gh**: Runs `gh auth switch -u <username>` before each invocation. Match function returns username, not account name.
+- **multi-gh**: Does not run `gh auth switch` for normal calls (it rewrites `hosts.yml`, which concurrent callers corrupt). The shared `ghExecAs` helper reads `gh auth token -u <username>` and execs gh with `GH_TOKEN` for that process only (`*.ghe.com` `GH_HOST` also uses `GH_TOKEN` but passes `--hostname`; any other non-github.com `GH_HOST` uses `GH_ENTERPRISE_TOKEN` + `--hostname`; caller-set `GH_ENTERPRISE_TOKEN`/`GITHUB_ENTERPRISE_TOKEN` is honoured). Limitation: the account is only matched for github.com / ghe.com / an explicit `GH_HOST`; with `GH_HOST` unset (GHES-only) or a host inferred from a repo/`--hostname`, the lookup targets gh's default host, so use `GH_HOST` for GHES. Exception: `gh auth refresh`/`logout` act on the stored active account, so they still run `auth switch` first. Match function returns username, not account name. Also installs `gh-login-all` (`gh login` execs it): for each enabled account in priority order it checks `gh auth token -u` (output discarded), and for a missing one runs `gh auth login --hostname github.com --git-protocol https --web` with ambient token/host env unset, verifies the right user logged in, and exits non-zero if any account failed; `--account <name>` limits it to one. This is the one place hosts.yml is rewritten on purpose (rare, manual). It must never print a token.
 - **multi-gws**: Sets `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` per account. Receives `gwsPackage` as a flake input argument (injected in `flake.nix`).
 - **multi-codex**: Generates `config.toml` (TOML format) per account. MCP servers go into `[mcp_servers]` section. Hooks use separate `hooks.json` file. Skills placed in `.agents/skills/`. Memory file is `AGENTS.md`.
 - **multi-gemini**: Generates `settings.json` per account. Hooks and MCP servers merge into settings.json. Skills in `skills/`, commands in `commands/` (TOML), policies in `policies/` (TOML). Memory via `memory.md`, context via `GEMINI.md`.
