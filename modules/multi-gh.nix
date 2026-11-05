@@ -41,9 +41,17 @@ let
   # Shared helper: run gh as a given account, normally WITHOUT touching
   # hosts.yml. `gh auth switch` rewrites ~/.config/gh/hosts.yml, and concurrent
   # callers corrupt it. Instead we read the account's token (read-only) and hand
-  # it to this one process: GH_TOKEN for github.com, GH_ENTERPRISE_TOKEN when
-  # GH_HOST names another host (gh ignores GH_TOKEN there). Never prints or
-  # logs the token.
+  # it to this one process: GH_TOKEN for github.com and *.ghe.com (GitHub
+  # Enterprise Cloud; token looked up with --hostname "$GH_HOST"), and
+  # GH_ENTERPRISE_TOKEN for any OTHER GH_HOST (GitHub Enterprise Server; gh
+  # ignores GH_TOKEN there). A token already set by the caller wins
+  # (GH_TOKEN/GITHUB_TOKEN, or GH_ENTERPRISE_TOKEN/GITHUB_ENTERPRISE_TOKEN for
+  # the enterprise case). Never prints or logs the token.
+  # LIMITATION: the host is only taken from an explicit GH_HOST. If GH_HOST is
+  # unset, or the host is inferred from a repo remote or a --hostname flag, the
+  # token lookup targets gh's default host (github.com), so the account is only
+  # matched there. Set GH_HOST for GitHub Enterprise Server (unchanged from
+  # before for inferred hosts).
   # Exception: `gh auth refresh` and `gh auth logout` act on the stored ACTIVE
   # account, so for those two (rare, manual) we still run `gh auth switch`
   # first. login/switch/setup-git are plain pass-through.
@@ -60,10 +68,13 @@ let
       esac
       local gh_host="''${GH_HOST:-}" gh_token_var=GH_TOKEN gh_have_token=""
       local -a gh_host_args=()
-      if [[ -n "$gh_host" && "$gh_host" != "github.com" ]]; then
-        gh_token_var=GH_ENTERPRISE_TOKEN
-        gh_host_args=(--hostname "$gh_host")
-        [[ -n "''${GH_ENTERPRISE_TOKEN:-}" ]] && gh_have_token=1
+      case "$gh_host" in
+        ""|github.com) ;;
+        *.ghe.com) gh_host_args=(--hostname "$gh_host") ;;
+        *) gh_token_var=GH_ENTERPRISE_TOKEN; gh_host_args=(--hostname "$gh_host") ;;
+      esac
+      if [[ "$gh_token_var" == GH_ENTERPRISE_TOKEN ]]; then
+        [[ -n "''${GH_ENTERPRISE_TOKEN:-}" || -n "''${GITHUB_ENTERPRISE_TOKEN:-}" ]] && gh_have_token=1
       else
         [[ -n "''${GH_TOKEN:-}" || -n "''${GITHUB_TOKEN:-}" ]] && gh_have_token=1
       fi

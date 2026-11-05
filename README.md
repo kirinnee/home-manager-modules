@@ -358,10 +358,10 @@ For each account, a `claude-<name>` binary is created that:
 
 ### Multi-GH
 For each account, a `gh-<name>` binary is created that:
-- Reads the account's token read-only (`gh auth token -u <username>`) and runs gh with it in `GH_TOKEN` for that one process; when `GH_HOST` is set to a non-github.com host it uses `--hostname "$GH_HOST"` and `GH_ENTERPRISE_TOKEN` instead (gh ignores `GH_TOKEN` there). Normal calls never rewrite `hosts.yml`, so concurrent gh calls cannot corrupt it
-- Respects a token already set by the caller (`GH_TOKEN`/`GITHUB_TOKEN`, or `GH_ENTERPRISE_TOKEN` for non-github.com hosts), and passes `gh auth login/switch/setup-git` straight through
+- Reads the account's token read-only (`gh auth token -u <username>`) and runs gh with it in `GH_TOKEN` for that one process; when `GH_HOST` is a `*.ghe.com` host it still uses `GH_TOKEN` but looks the token up with `--hostname "$GH_HOST"`; for any other non-github.com `GH_HOST` (GitHub Enterprise Server) it uses `--hostname "$GH_HOST"` and `GH_ENTERPRISE_TOKEN` instead (gh ignores `GH_TOKEN` there). Normal calls never rewrite `hosts.yml`, so concurrent gh calls cannot corrupt it
+- Respects a token already set by the caller (`GH_TOKEN`/`GITHUB_TOKEN`, or `GH_ENTERPRISE_TOKEN`/`GITHUB_ENTERPRISE_TOKEN` for GitHub Enterprise Server hosts), and passes `gh auth login/switch/setup-git` straight through
 - `gh auth refresh` and `gh auth logout` still run `gh auth switch -u <username>` first (rewriting `hosts.yml`), because they must act on the stored account; these are rare, manual commands
-- If the token lookup fails, warns on stderr (account name only) and falls back to gh's active account
+- **Limitation:** the account is only matched for github.com, `*.ghe.com` and an explicit `GH_HOST`. If `GH_HOST` is unset and the only stored host is a GitHub Enterprise Server, or the host is inferred from a repo remote or `--hostname`, the token lookup targets gh's default host — so set `GH_HOST` for GHES (unchanged from before for inferred hosts)\n- If the token lookup fails, warns on stderr (account name only) and falls back to gh's active account
 - Executes the underlying `gh` binary with all arguments
 
 ### Multi-GWS
