@@ -193,9 +193,13 @@ in
       # Create wrapped packages for each account
       wrappedPackages = lib.mapAttrs createWrappedGh enabledAccounts;
 
-      # Quoted "name:username" pairs for every enabled account, in priority order.
-      loginAccountPairs = lib.concatMapStringsSep " "
-        ({ name, value }: lib.escapeShellArg "${name}:${value.username}")
+      # Quoted account names and usernames (parallel lists, so any character in
+      # a name is safe), in priority order.
+      loginAccountNames = lib.concatMapStringsSep " "
+        ({ name, ... }: lib.escapeShellArg name)
+        sortedAccounts;
+      loginAccountUsers = lib.concatMapStringsSep " "
+        ({ value, ... }: lib.escapeShellArg value.username)
         sortedAccounts;
 
       # `gh-login-all`: log into every configured account in one go, or just one
@@ -208,33 +212,36 @@ in
         # Log into every configured GitHub account (or one, with --account).
         gh_bin=${lib.getExe cfg.defaultPackage}
         gh_host=github.com
-        accounts=(${loginAccountPairs})
+        names=(${loginAccountNames})
+        users=(${loginAccountUsers})
 
         usage() {
           echo "usage: gh-login-all [--account <name>]" >&2
-          echo "accounts: $(for p in "''${accounts[@]}"; do printf '%s ' "''${p%%:*}"; done)" >&2
+          echo "accounts: ''${names[*]}" >&2
         }
 
         only=""
+        have_only=""
         while [[ $# -gt 0 ]]; do
           case "$1" in
-            --account) [[ $# -ge 2 ]] || { usage; exit 2; }; only="$2"; shift 2 ;;
-            --account=*) only="''${1#--account=}"; shift ;;
+            --account) [[ $# -ge 2 ]] || { usage; exit 2; }; only="$2"; have_only=1; shift 2 ;;
+            --account=*) only="''${1#--account=}"; have_only=1; shift ;;
             -h|--help) usage; exit 0 ;;
             *) echo "gh-login-all: unknown argument '$1'" >&2; usage; exit 2 ;;
           esac
         done
 
-        if [[ -n "$only" ]]; then
+        if [[ -n "$have_only" ]]; then
           found=""
-          for pair in "''${accounts[@]}"; do [[ "''${pair%%:*}" == "$only" ]] && found=1; done
+          for n in "''${names[@]}"; do [[ "$n" == "$only" ]] && found=1; done
           [[ -n "$found" ]] || { echo "gh-login-all: no such account '$only'" >&2; usage; exit 2; }
         fi
 
         # gh with no ambient token/host: an env token would make `auth login`
         # refuse and `auth token` return the wrong thing.
+        # GH_DEBUG=api would trace OAuth response bodies (tokens) during login.
         gh_clean() {
-          env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GH_HOST \
+          env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GH_HOST -u GH_DEBUG -u DEBUG \
             "$gh_bin" "$@"
         }
         # True when this user is stored. The token goes to /dev/null, never to the screen.
@@ -242,10 +249,10 @@ in
 
         summary=()
         failed=0
-        for pair in "''${accounts[@]}"; do
-          name="''${pair%%:*}"
-          user="''${pair#*:}"
-          [[ -z "$only" || "$only" == "$name" ]] || continue
+        for i in "''${!names[@]}"; do
+          name="''${names[$i]}"
+          user="''${users[$i]}"
+          [[ -z "$have_only" || "$only" == "$name" ]] || continue
 
           if has_login "$user"; then
             echo "$name: already logged in"

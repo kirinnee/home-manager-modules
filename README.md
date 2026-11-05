@@ -396,7 +396,7 @@ For each account, a `gws-<name>` binary is created that:
 
 - GitHub CLI users must log into each account before using the module: run `gh-login-all` (or `gh auth login` per account)
 - GWS users must run `GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws-<name> gws auth login` for each account before using the module
-- The modules only handle account switching, not initial authentication
+- The modules handle account switching; for GitHub CLI, `gh-login-all` also handles the initial login (the other modules need their own `auth login`)
 
 ## File Structure (multi-claude)
 
