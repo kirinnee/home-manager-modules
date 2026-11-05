@@ -18,7 +18,7 @@ Manage multiple Claude Code accounts with isolated configurations, MCP servers, 
 
 ### Multi-GH (`multi-gh`)
 
-Manage multiple GitHub CLI accounts with automatic directory-based account switching via `gh auth switch`.
+Manage multiple GitHub CLI accounts with automatic directory-based account switching by handing each gh process the right account's token (`GH_TOKEN`), never by switching the stored account.
 
 **Features:**
 - Directory-based account switching
@@ -229,7 +229,7 @@ This generates:
 |--------|------|---------|-------------|
 | `enable` | boolean | `true` | Enable this account |
 | `priority` | int | `100` | Match priority (lower = first) |
-| `username` | string | *(required)* | GitHub username for `gh auth switch` |
+| `username` | string | *(required)* | GitHub username whose token is used (`gh auth token -u <username>`) |
 | `directoryRules` | list of string | `[ ]` | Paths that trigger this account (supports `~`) |
 | `package` | package or null | `null` | Override package for this account |
 
@@ -358,7 +358,9 @@ For each account, a `claude-<name>` binary is created that:
 
 ### Multi-GH
 For each account, a `gh-<name>` binary is created that:
-- Runs `gh auth switch -u <username>` before executing
+- Reads the account's token read-only (`gh auth token -u <username>`) and runs gh with it in `GH_TOKEN` for that one process; `hosts.yml` is never rewritten, so concurrent gh calls cannot corrupt it
+- Respects a `GH_TOKEN`/`GITHUB_TOKEN` already set by the caller, and passes `gh auth login/logout/switch/refresh/setup-git` straight through
+- If the token lookup fails, warns on stderr (account name only) and falls back to gh's active account
 - Executes the underlying `gh` binary with all arguments
 
 ### Multi-GWS

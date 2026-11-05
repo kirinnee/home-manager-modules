@@ -40,7 +40,7 @@ Each module in `modules/` follows the same pattern:
 | Module file | Option path | Config format | Isolation env var |
 |---|---|---|---|
 | `multi-claude.nix` | `programs.claude-multi` | JSON | `CLAUDE_CONFIG_DIR` |
-| `multi-gh.nix` | `programs.multi-gh` | — | `gh auth switch` |
+| `multi-gh.nix` | `programs.multi-gh` | — | `GH_TOKEN` (per process) |
 | `multi-gws.nix` | `programs.multi-gws` | — | `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` |
 | `multi-codex.nix` | `programs.multi-codex` | TOML | `CODEX_HOME` |
 | `multi-gemini.nix` | `programs.multi-gemini` | JSON | `GEMINI_CLI_HOME` |
@@ -56,7 +56,7 @@ Each module in `modules/` follows the same pattern:
 ### Module-Specific Details
 
 - **multi-claude**: Most complex. Manages full Claude Code config tree (settings.json, CLAUDE.md, rules/, agents/, commands/, hooks/, skills/) and MCP server config via `--mcp-config`. Uses `pkgs.formats.json` for generating MCP config files.
-- **multi-gh**: Runs `gh auth switch -u <username>` before each invocation. Match function returns username, not account name.
+- **multi-gh**: Never runs `gh auth switch` (it rewrites `hosts.yml`, which concurrent callers corrupt). The shared `ghExecAs` helper reads `gh auth token -u <username>` and execs gh with `GH_TOKEN` for that process only. Match function returns username, not account name.
 - **multi-gws**: Sets `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` per account. Receives `gwsPackage` as a flake input argument (injected in `flake.nix`).
 - **multi-codex**: Generates `config.toml` (TOML format) per account. MCP servers go into `[mcp_servers]` section. Hooks use separate `hooks.json` file. Skills placed in `.agents/skills/`. Memory file is `AGENTS.md`.
 - **multi-gemini**: Generates `settings.json` per account. Hooks and MCP servers merge into settings.json. Skills in `skills/`, commands in `commands/` (TOML), policies in `policies/` (TOML). Memory via `memory.md`, context via `GEMINI.md`.

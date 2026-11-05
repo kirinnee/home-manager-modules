@@ -38,6 +38,33 @@ let
     }
   '';
 
+  # Shared helper: run gh as a given account WITHOUT touching hosts.yml.
+  # `gh auth switch` rewrites ~/.config/gh/hosts.yml, and concurrent callers
+  # corrupt it. Instead we read the account's token (read-only) and hand it to
+  # this one process through GH_TOKEN. Never prints or logs the token.
+  # Usage: _gh_exec_as <gh-binary> <username> [gh args...]
+  ghExecAs = ''
+    _gh_exec_as() {
+      local gh_bin="$1" gh_user="$2"
+      shift 2
+      # Respect a token the caller already chose, and leave `gh auth
+      # login/logout/switch/refresh/setup-git` on the stored credentials.
+      case "''${1:-}:''${2:-}" in
+        auth:login|auth:logout|auth:switch|auth:refresh|auth:setup-git) exec "$gh_bin" "$@" ;;
+      esac
+      if [[ -z "''${GH_TOKEN:-}" && -z "''${GITHUB_TOKEN:-}" && -n "$gh_user" ]]; then
+        local gh_token
+        gh_token="$("$gh_bin" auth token -u "$gh_user" 2>/dev/null)" || gh_token=""
+        if [[ -n "$gh_token" ]]; then
+          export GH_TOKEN="$gh_token"
+        else
+          echo "multi-gh: could not read a token for account '$gh_user'; using gh's active account" >&2
+        fi
+      fi
+      exec "$gh_bin" "$@"
+    }
+  '';
+
   # Create a wrapped gh binary for an account
   createWrappedGh = name: accountCfg:
     let
@@ -45,9 +72,9 @@ let
       ghBinary = lib.getExe basePackage;
     in
     pkgs.writeShellScriptBin "gh-${name}" ''
-      # Switch to this account before executing
-      ${ghBinary} auth switch -u "${accountCfg.username}" >/dev/null 2>&1
-      exec ${ghBinary} "$@"
+      ${ghExecAs}
+      # Run as this account (per process, no hosts.yml rewrite)
+      _gh_exec_as ${ghBinary} "${accountCfg.username}" "$@"
     '';
 
 in
@@ -111,7 +138,7 @@ in
 
           username = lib.mkOption {
             type = lib.types.str;
-            description = "GitHub username for authentication switching";
+            description = "GitHub username whose token is used for this account (read per process via `gh auth token -u`; hosts.yml is never rewritten)";
           };
 
           directoryRules = lib.mkOption {
@@ -175,9 +202,10 @@ in
       # Generate the smart wrapper script
       smartWrapperScript = pkgs.writeShellScriptBin "gh" ''
         # GitHub CLI Multi-Account Smart Wrapper
-        # Automatically switches accounts based on current working directory
+        # Automatically picks the account based on current working directory
 
         ${generateMatchFunction}
+        ${ghExecAs}
 
         # `gh login`: detect and log into every account that isn't authenticated.
         ${loginAllSnippet}
@@ -190,9 +218,8 @@ in
           echo "🔐 Using GitHub account: $username" >&2
         fi
 
-        # Switch to matched account, then execute
-        ${lib.getExe cfg.defaultPackage} auth switch -u "$username" >/dev/null 2>&1
-        exec ${lib.getExe cfg.defaultPackage} "$@"
+        # Run as the matched account (per process, no hosts.yml rewrite)
+        _gh_exec_as ${lib.getExe cfg.defaultPackage} "$username" "$@"
       '';
 
       # Create alias packages for each alias
@@ -203,16 +230,18 @@ in
           smartAlias = pkgs.writeShellScriptBin aliasName ''
             ${generateMatchFunction}
 
+            ${ghExecAs}
+
             username=$(_gh_match_account)
-            ${lib.getExe cfg.defaultPackage} auth switch -u "$username" >/dev/null 2>&1
-            exec ${lib.getExe cfg.defaultPackage} "$@" ${aliasFlags}
+            _gh_exec_as ${lib.getExe cfg.defaultPackage} "$username" "$@" ${aliasFlags}
           '';
 
           # Per-account aliases (direct)
           perAccountAliases = lib.mapAttrsToList (accountName: accountCfg:
             pkgs.writeShellScriptBin "${aliasName}-${accountName}" ''
-              ${lib.getExe cfg.defaultPackage} auth switch -u "${accountCfg.username}" >/dev/null 2>&1
-              exec ${lib.getExe cfg.defaultPackage} "$@" ${aliasFlags}
+              ${ghExecAs}
+
+              _gh_exec_as ${lib.getExe cfg.defaultPackage} "${accountCfg.username}" "$@" ${aliasFlags}
             ''
           ) enabledAccounts;
         in
