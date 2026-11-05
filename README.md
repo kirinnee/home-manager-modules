@@ -24,6 +24,7 @@ Manage multiple GitHub CLI accounts with automatic directory-based account switc
 - Directory-based account switching
 - Per-account binaries (`gh-personal`, `gh-work`, etc.)
 - Smart `gh` wrapper that auto-switches accounts
+- `gh-login-all`: log into every configured account in one command
 - Shell integration with optional prompt helper
 - Priority-based directory matching
 
@@ -175,6 +176,24 @@ This generates the following commands:
   };
 }
 ```
+
+### Logging into all accounts (`gh-login-all`)
+
+Run `gh-login-all` once after install (or after adding an account). `gh login` is a shorthand for the same command.
+
+```bash
+gh-login-all                    # every enabled account, in priority order
+gh-login-all --account work     # just one account (the name from `accounts.<name>`)
+```
+
+For each account it checks the stored login read-only (`gh auth token -u <username>`; the token is discarded, never printed):
+
+- already logged in: prints `<account>: already logged in` and skips it
+- otherwise: prints `<account>: log in as <username> in the browser now`, runs `gh auth login --hostname github.com --git-protocol https --web`, then checks the login. If the browser session was a different user, it says `you logged in as <other>, expected <username>; run gh-login-all again` and carries on to the next account
+
+It ends with one summary line per account and exits non-zero if any account failed. Log in to each account in the browser as the user it names (switch browser accounts first if needed).
+
+**Note:** `gh auth login` adds a user and rewrites `~/.config/gh/hosts.yml`. That is fine here: it is a rare, manual, one-person command (the same reason `gh auth refresh`/`logout` still switch). Normal `gh` calls still never rewrite it. The host is `github.com` over HTTPS; for GitHub Enterprise Server run `gh auth login --hostname <host>` yourself.
 
 ### Key Options
 
@@ -365,6 +384,8 @@ For each account, a `gh-<name>` binary is created that:
 - If the token lookup fails, warns on stderr (account name only) and falls back to gh's active account
 - Executes the underlying `gh` binary with all arguments
 
+A single `gh-login-all` binary is also installed (and `gh login` calls it): it logs into every configured account that isn't already stored, or one with `--account <name>`, verifies each login is the expected user, prints a per-account summary and exits non-zero on any failure. It never prints a token.
+
 ### Multi-GWS
 For each account, a `gws-<name>` binary is created that:
 - Sets `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` to `~/.config/gws-<name>`
@@ -373,7 +394,7 @@ For each account, a `gws-<name>` binary is created that:
 
 ## Requirements
 
-- GitHub CLI users must run `gh auth login` for each account before using the module
+- GitHub CLI users must log into each account before using the module: run `gh-login-all` (or `gh auth login` per account)
 - GWS users must run `GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws-<name> gws auth login` for each account before using the module
 - The modules only handle account switching, not initial authentication
 

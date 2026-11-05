@@ -193,36 +193,94 @@ in
       # Create wrapped packages for each account
       wrappedPackages = lib.mapAttrs createWrappedGh enabledAccounts;
 
-      # Space-separated list of every configured account username, in priority
-      # order, used by the `gh login` login-all handler below.
-      loginUsernames = lib.concatMapStringsSep " " ({ value, ... }: value.username) sortedAccounts;
+      # Quoted "name:username" pairs for every enabled account, in priority order.
+      loginAccountPairs = lib.concatMapStringsSep " "
+        ({ name, value }: lib.escapeShellArg "${name}:${value.username}")
+        sortedAccounts;
 
-      # `gh login` (our own subcommand, not `gh auth login`) checks every
-      # configured account and runs `gh auth login` for each one that isn't
-      # already authenticated, so a single command brings the whole fleet up.
-      loginAllSnippet = ''
-        if [ "$1" = "login" ]; then
-          shift
-          echo "🔐 Checking all configured GitHub accounts…" >&2
-          _gh_status="$(${lib.getExe cfg.defaultPackage} auth status 2>&1 || true)"
-          _gh_missing=0
-          for _gh_u in ${loginUsernames}; do
-            if printf '%s\n' "$_gh_status" | grep -q "account $_gh_u "; then
-              echo "  ✓ $_gh_u — already logged in" >&2
-            else
-              echo "" >&2
-              echo "  → $_gh_u — NOT logged in. Starting login; authenticate as $_gh_u." >&2
-              ${lib.getExe cfg.defaultPackage} auth login "$@"
-              _gh_missing=$((_gh_missing + 1))
-            fi
-          done
-          if [ "$_gh_missing" -eq 0 ]; then
-            echo "✅ All configured accounts are already logged in." >&2
-          else
-            echo "✅ Logged in $_gh_missing account(s)." >&2
-          fi
-          exit 0
+      # `gh-login-all`: log into every configured account in one go, or just one
+      # with `--account <name>`. For each account it checks the stored login
+      # read-only (`gh auth token -u`, output discarded), and only for a missing
+      # one runs `gh auth login` (browser), then verifies the right user logged
+      # in. `gh auth login` adds a user and rewrites hosts.yml: fine for this
+      # rare, manual, one-person command. Never prints or logs a token.
+      loginAllScript = pkgs.writeShellScriptBin "gh-login-all" ''
+        # Log into every configured GitHub account (or one, with --account).
+        gh_bin=${lib.getExe cfg.defaultPackage}
+        gh_host=github.com
+        accounts=(${loginAccountPairs})
+
+        usage() {
+          echo "usage: gh-login-all [--account <name>]" >&2
+          echo "accounts: $(for p in "''${accounts[@]}"; do printf '%s ' "''${p%%:*}"; done)" >&2
+        }
+
+        only=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --account) [[ $# -ge 2 ]] || { usage; exit 2; }; only="$2"; shift 2 ;;
+            --account=*) only="''${1#--account=}"; shift ;;
+            -h|--help) usage; exit 0 ;;
+            *) echo "gh-login-all: unknown argument '$1'" >&2; usage; exit 2 ;;
+          esac
+        done
+
+        if [[ -n "$only" ]]; then
+          found=""
+          for pair in "''${accounts[@]}"; do [[ "''${pair%%:*}" == "$only" ]] && found=1; done
+          [[ -n "$found" ]] || { echo "gh-login-all: no such account '$only'" >&2; usage; exit 2; }
         fi
+
+        # gh with no ambient token/host: an env token would make `auth login`
+        # refuse and `auth token` return the wrong thing.
+        gh_clean() {
+          env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GH_HOST \
+            "$gh_bin" "$@"
+        }
+        # True when this user is stored. The token goes to /dev/null, never to the screen.
+        has_login() { gh_clean auth token --hostname "$gh_host" -u "$1" >/dev/null 2>&1; }
+
+        summary=()
+        failed=0
+        for pair in "''${accounts[@]}"; do
+          name="''${pair%%:*}"
+          user="''${pair#*:}"
+          [[ -z "$only" || "$only" == "$name" ]] || continue
+
+          if has_login "$user"; then
+            echo "$name: already logged in"
+            summary+=("$name: already logged in")
+            continue
+          fi
+
+          echo "$name: log in as $user in the browser now"
+          if ! gh_clean auth login --hostname "$gh_host" --git-protocol https --web; then
+            echo "$name: login did not finish" >&2
+            summary+=("$name: FAILED (login did not finish)")
+            failed=1
+            continue
+          fi
+
+          if has_login "$user"; then
+            summary+=("$name: logged in")
+          else
+            # The new login is gh's active account; ask who it is (login name only).
+            actual="$(gh_clean api user --jq .login 2>/dev/null)" || actual=""
+            if [[ -n "$actual" ]]; then
+              echo "$name: you logged in as $actual, expected $user; run gh-login-all again" >&2
+              summary+=("$name: FAILED (logged in as $actual, expected $user)")
+            else
+              echo "$name: could not confirm a login for $user; run gh-login-all again" >&2
+              summary+=("$name: FAILED (no login for $user)")
+            fi
+            failed=1
+          fi
+        done
+
+        echo
+        echo "Summary:"
+        for line in "''${summary[@]}"; do echo "  $line"; done
+        exit "$failed"
       '';
 
       # Generate the smart wrapper script
@@ -233,8 +291,11 @@ in
         ${generateMatchFunction}
         ${ghExecAs}
 
-        # `gh login`: detect and log into every account that isn't authenticated.
-        ${loginAllSnippet}
+        # `gh login`: shorthand for `gh-login-all` (log into every configured account).
+        if [[ "''${1:-}" == "login" ]]; then
+          shift
+          exec ${lib.getExe loginAllScript} "$@"
+        fi
 
         # Main execution
         username=$(_gh_match_account)
@@ -283,6 +344,10 @@ in
           message = "programs.multi-gh.defaultAccount must reference an existing account. Got '${cfg.defaultAccount}' but available accounts are: ${lib.concatStringsSep ", " accountNames}";
         }
         {
+          assertion = !(lib.elem "login-all" accountNames);
+          message = "programs.multi-gh: an account named 'login-all' would collide with the gh-login-all command";
+        }
+        {
           assertion = accountNames != [ ];
           message = "programs.multi-gh requires at least one account to be defined";
         }
@@ -321,6 +386,7 @@ in
       # Add smart wrapper, wrapped packages, and aliases
       home.packages =
         (lib.optionals cfg.smartWrapper.enable [ smartWrapperScript ]) ++
+        [ loginAllScript ] ++
         (lib.attrValues wrappedPackages) ++
         (lib.flatten aliasPackages);
     }
